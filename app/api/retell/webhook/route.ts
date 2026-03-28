@@ -86,8 +86,6 @@ export async function POST(request: NextRequest) {
 
       const allCallerText = callerMessages.join(" ");
       const allAgentText = agentMessages.join(" ");
-      const confirmLower = confirmationLine.toLowerCase();
-
       console.log("Confirmation line found:", confirmationLine.substring(0, 200));
 
       // --- NAME ---
