@@ -174,6 +174,45 @@ export default function CallDetailPage({
           )}
         </div>
 
+        {/* Transcript */}
+        {call.transcript && (
+          <div className="bg-[#1A1D27] rounded-xl p-6 border border-white/10">
+            <h3 className="font-heading font-bold text-lg text-white mb-4">
+              Call Transcript
+            </h3>
+            <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
+              {call.transcript.split("\n").filter(Boolean).map((line, i) => {
+                const isAgent = line.toLowerCase().startsWith("agent:") || line.toLowerCase().startsWith("zara:");
+                const isCaller = line.toLowerCase().startsWith("caller:") || line.toLowerCase().startsWith("user:");
+                const cleanLine = line.replace(/^(agent|zara|caller|user):\s*/i, "");
+                return (
+                  <div
+                    key={i}
+                    className={`flex ${isCaller ? "justify-end" : "justify-start"}`}
+                  >
+                    <div
+                      className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                        isCaller
+                          ? "bg-terracotta/20 text-gray-200 rounded-tr-sm"
+                          : isAgent
+                          ? "bg-white/5 text-gray-200 rounded-tl-sm"
+                          : "bg-white/5 text-gray-400"
+                      }`}
+                    >
+                      {(isAgent || isCaller) && (
+                        <span className="text-[10px] uppercase tracking-wider text-gray-500 block mb-1">
+                          {isAgent ? "Zara" : "Caller"}
+                        </span>
+                      )}
+                      {cleanLine}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Recording */}
         {call.recording_url && (
           <div className="bg-[#1A1D27] rounded-xl p-6 border border-white/10">

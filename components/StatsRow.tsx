@@ -13,10 +13,10 @@ export function StatsRow({ calls }: StatsRowProps) {
   const urgentCalls = calls.filter((c) => c.urgency === "urgent").length;
 
   const stats = [
-    { label: "Total Calls", value: totalCalls },
-    { label: "New / Unreviewed", value: newCalls },
-    { label: "Event Bookings", value: eventBookings },
-    { label: "Urgent", value: urgentCalls },
+    { label: "Total Calls", value: totalCalls, color: "text-white" },
+    { label: "New", value: newCalls, color: "text-amber-400" },
+    { label: "Event Bookings", value: eventBookings, color: "text-terracotta" },
+    { label: "Urgent", value: urgentCalls, color: "text-red-400" },
   ];
 
   return (
@@ -24,11 +24,13 @@ export function StatsRow({ calls }: StatsRowProps) {
       {stats.map((stat) => (
         <div
           key={stat.label}
-          className="bg-[#1A1D27] rounded-xl p-5 border border-white/10"
+          className="bg-[#1A1D27] rounded-xl p-6 border border-white/10 text-center"
         >
-          <p className="text-sm text-gray-500 font-medium">{stat.label}</p>
-          <p className="text-3xl font-heading font-bold text-white mt-1">
+          <p className={`text-5xl md:text-6xl font-heading font-bold ${stat.color}`}>
             {stat.value}
+          </p>
+          <p className="text-xs text-gray-500 uppercase tracking-widest mt-2">
+            {stat.label}
           </p>
         </div>
       ))}

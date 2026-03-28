@@ -7,11 +7,22 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    // Retell sends call data in call_analysis.custom_analysis_data
-    const callData = body.call_analysis?.custom_analysis_data || {};
-    const callId = body.call_id || null;
-    const duration = body.duration || null;
-    const recordingUrl = body.recording_url || null;
+    console.log("Retell webhook received:", JSON.stringify(body, null, 2));
+
+    // Retell may send data in different locations depending on config
+    const callData =
+      body.call_analysis?.custom_analysis_data ||
+      body.call_analysis ||
+      body.custom_analysis_data ||
+      body;
+
+    const callId = body.call_id || body.call_sid || null;
+    const duration =
+      body.duration || body.call_duration_seconds || body.duration_ms
+        ? Math.round((body.duration_ms || 0) / 1000)
+        : null;
+    const recordingUrl =
+      body.recording_url || body.recording_uri || null;
 
     const row = {
       caller_name: callData.caller_name || null,
@@ -29,7 +40,17 @@ export async function POST(request: NextRequest) {
       retell_call_id: callId,
       call_duration_seconds: duration,
       recording_url: recordingUrl,
+      transcript: body.transcript || null,
     };
+
+    // Check if Supabase is configured
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL === "") {
+      console.error("Supabase not configured");
+      return NextResponse.json(
+        { error: "Database not configured", received: row },
+        { status: 500 }
+      );
+    }
 
     const { data, error } = await supabaseAdmin
       .from("call_logs")
@@ -39,10 +60,13 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error("Supabase insert error:", error);
-      return NextResponse.json({ error: "Failed to log call" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Failed to log call", details: error.message },
+        { status: 500 }
+      );
     }
 
-    // Send email notification (non-blocking — don't fail the webhook if email fails)
+    // Send email notification (non-blocking)
     try {
       await sendNewCallNotification(data as CallLog);
     } catch (emailError) {
@@ -52,6 +76,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, id: data.id });
   } catch (err) {
     console.error("Webhook error:", err);
-    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid request", details: String(err) },
+      { status: 400 }
+    );
   }
+}
+
+// Also handle GET for easy testing in browser
+export async function GET() {
+  return NextResponse.json({
+    status: "ok",
+    message: "Retell webhook endpoint is live. Send a POST request.",
+    supabase_configured: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+    resend_configured: !!process.env.RESEND_API_KEY,
+  });
 }

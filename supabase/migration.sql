@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS call_logs (
   status TEXT NOT NULL DEFAULT 'new',
   retell_call_id TEXT,
   call_duration_seconds INTEGER,
-  recording_url TEXT
+  recording_url TEXT,
+  transcript TEXT
 );
 
 -- Indexes for common queries

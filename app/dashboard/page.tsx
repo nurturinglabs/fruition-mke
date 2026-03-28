@@ -5,7 +5,7 @@ import { CallLog } from "@/types/call";
 import { NavBar } from "@/components/landing/NavBar";
 import { StatsRow } from "@/components/StatsRow";
 import { FilterBar } from "@/components/FilterBar";
-import { CallCard } from "@/components/CallCard";
+import { CallTable } from "@/components/CallTable";
 
 export default function DashboardPage() {
   const [calls, setCalls] = useState<CallLog[]>([]);
@@ -74,22 +74,20 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-[#0F1117]">
       <NavBar />
-      <header className="px-4 md:px-8 py-5">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="font-heading text-2xl font-bold text-white">
-              Call Inbox
-            </h1>
-          </div>
+
+      <main className="max-w-7xl mx-auto px-4 md:px-8 py-6 space-y-6">
+        {/* Header row */}
+        <div className="flex items-center justify-between">
+          <h1 className="font-heading text-2xl font-bold text-white">
+            Call Inbox
+          </h1>
           {newCallCount > 0 && (
             <span className="px-3 py-1 bg-amber-400 text-nearblack text-sm font-semibold rounded-full">
-              {newCallCount} new call{newCallCount !== 1 ? "s" : ""}
+              {newCallCount} new
             </span>
           )}
         </div>
-      </header>
 
-      <main className="max-w-6xl mx-auto px-4 md:px-8 py-6 space-y-6">
         <StatsRow calls={calls} />
 
         <FilterBar
@@ -110,15 +108,10 @@ export default function DashboardPage() {
             </p>
           </div>
         ) : (
-          <div className="grid gap-4">
-            {filteredCalls.map((call) => (
-              <CallCard
-                key={call.id}
-                call={call}
-                onMarkReviewed={handleMarkReviewed}
-              />
-            ))}
-          </div>
+          <CallTable
+            calls={filteredCalls}
+            onMarkReviewed={handleMarkReviewed}
+          />
         )}
       </main>
     </div>

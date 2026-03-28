@@ -27,4 +27,5 @@ export interface CallLog {
   retell_call_id: string | null;
   call_duration_seconds: number | null;
   recording_url: string | null;
+  transcript: string | null;
 }
