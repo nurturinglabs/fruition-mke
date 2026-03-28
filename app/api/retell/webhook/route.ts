@@ -62,31 +62,106 @@ export async function POST(request: NextRequest) {
       transcript: transcript,
     };
 
-    // Try to extract info from transcript if call_analysis is empty
-    if (!row.caller_name && transcript) {
-      // Look for name patterns in the transcript
-      const nameMatch = transcript.match(
-        /(?:my name is|i'm|this is|name is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i
-      );
-      if (nameMatch) row.caller_name = nameMatch[1];
-    }
-    if (!row.caller_phone && transcript) {
-      // Look for phone number patterns
-      const phoneMatch = transcript.match(
-        /(\d{3}[-.\s]?\d{3}[-.\s]?\d{4})/
-      );
-      if (phoneMatch) row.caller_phone = phoneMatch[1];
-    }
-    if (row.intent === "general_inquiry" && transcript) {
-      const lower = transcript.toLowerCase();
-      if (lower.includes("event") || lower.includes("book")) {
-        row.intent = "event_space_booking";
-      } else if (lower.includes("coworking") || lower.includes("desk") || lower.includes("membership")) {
-        row.intent = "coworking_inquiry";
-      } else if (lower.includes("makerspace") || lower.includes("sewing") || lower.includes("woodwork")) {
-        row.intent = "makerspace_inquiry";
-      } else if (lower.includes("cafe") || lower.includes("coffee") || lower.includes("food")) {
-        row.intent = "cafe_inquiry";
+    // Extract info from transcript if call_analysis didn't provide it
+    // Only look at CALLER lines to avoid matching agent speech (e.g. "This is Zara")
+    if (call.transcript_object && Array.isArray(call.transcript_object)) {
+      const callerLines = call.transcript_object
+        .filter((t: { role: string }) => t.role === "user")
+        .map((t: { content: string }) => t.content)
+        .join(" ");
+
+      const agentLines = call.transcript_object
+        .filter((t: { role: string }) => t.role === "agent")
+        .map((t: { content: string }) => t.content)
+        .join(" ");
+
+      // Extract name from caller speech
+      if (!row.caller_name) {
+        const nameMatch = callerLines.match(
+          /(?:my name is|i'm|i am|it's|name is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i
+        );
+        if (nameMatch) row.caller_name = nameMatch[1];
+      }
+
+      // Also check if agent confirmed a name — "so that's [Name]" or "Great, [Name]!"
+      if (!row.caller_name) {
+        const agentConfirm = agentLines.match(
+          /(?:so that's|got it,?|great,?|perfect,?|thanks?,?)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)[!,.\s]/i
+        );
+        if (agentConfirm && agentConfirm[1].toLowerCase() !== "zara") {
+          row.caller_name = agentConfirm[1];
+        }
+      }
+
+      // Extract phone from agent confirmation (more reliable — agent reads it back formatted)
+      if (!row.caller_phone) {
+        const phoneInAgent = agentLines.match(
+          /(\d{3}[-.\s]?\d{3}[-.\s]?\d{4})/
+        );
+        if (phoneInAgent) row.caller_phone = phoneInAgent[1];
+      }
+      // Fallback: phone from caller speech
+      if (!row.caller_phone) {
+        const phoneInCaller = callerLines.match(
+          /(\d{3}[-.\s]?\d{3}[-.\s]?\d{4})/
+        );
+        if (phoneInCaller) row.caller_phone = phoneInCaller[1];
+      }
+
+      // Extract callback preference from caller speech
+      if (!row.callback_preference) {
+        const callerLower = callerLines.toLowerCase();
+        if (callerLower.includes("morning")) row.callback_preference = "morning";
+        else if (callerLower.includes("afternoon")) row.callback_preference = "afternoon";
+        else if (callerLower.includes("evening")) row.callback_preference = "evening";
+        else if (callerLower.includes("anytime") || callerLower.includes("any time"))
+          row.callback_preference = "anytime";
+      }
+
+      // Detect intent from full transcript
+      if (row.intent === "general_inquiry") {
+        const allText = (callerLines + " " + agentLines).toLowerCase();
+        if (allText.includes("event") || allText.includes("book")) {
+          row.intent = "event_space_booking";
+        } else if (allText.includes("coworking") || allText.includes("desk") || allText.includes("membership")) {
+          row.intent = "coworking_inquiry";
+        } else if (allText.includes("makerspace") || allText.includes("sewing") || allText.includes("woodwork")) {
+          row.intent = "makerspace_inquiry";
+        } else if (allText.includes("cafe") || allText.includes("coffee") || allText.includes("food")) {
+          row.intent = "cafe_inquiry";
+        }
+      }
+
+      // Extract event details from caller + agent speech
+      if (row.intent === "event_space_booking") {
+        if (!row.event_type) {
+          const typeMatch = callerLines.match(
+            /(?:a |an )?(\w+(?:\s+\w+)?)\s+(?:meetup|meeting|party|workshop|event|photoshoot|gathering)/i
+          );
+          if (typeMatch) row.event_type = typeMatch[0].trim();
+        }
+        if (!row.event_headcount) {
+          const headcountMatch = callerLines.match(
+            /(\d+)\s*(?:people|guests|attendees|persons|folks)/i
+          );
+          if (headcountMatch) row.event_headcount = headcountMatch[1];
+        }
+        if (!row.event_date) {
+          // Check agent confirmation for date (more reliable)
+          const dateMatch = agentLines.match(
+            /(?:on |for )?((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+from\s+[\d\s:APMapm]+(?:to|-)[\d\s:APMapm]+)?)/i
+          );
+          if (dateMatch) row.event_date = dateMatch[1];
+        }
+        if (!row.special_requirements) {
+          const lower = callerLines.toLowerCase();
+          if (lower.includes("av ") || lower.includes("audio") || lower.includes("projector") || lower.includes("equipment")) {
+            row.special_requirements = "AV equipment";
+          }
+          if (lower.includes("catering") || lower.includes("food")) {
+            row.special_requirements = (row.special_requirements ? row.special_requirements + ", " : "") + "Catering";
+          }
+        }
       }
     }
 
