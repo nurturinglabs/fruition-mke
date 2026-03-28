@@ -103,13 +103,18 @@ export async function POST(request: NextRequest) {
           }
         }
       }
-      // Fallback: caller says "my name is X" or "It's X" or "I'm X"
+      // Fallback: caller says "my name is X" or "name is X"
       if (!row.caller_name) {
+        // Only match explicit "my name is" or "name is" — NOT "I'm" which catches "I'm looking to..."
         const callerNameMatch = allCallerText.match(
-          /(?:my name is|name is|it's|i'm)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*[.,!]?\s*$/im
+          /(?:my name is|name is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/im
         );
-        if (callerNameMatch && !["looking", "calling", "here", "fine", "good"].includes(callerNameMatch[1].toLowerCase())) {
-          row.caller_name = callerNameMatch[1];
+        if (callerNameMatch) {
+          const candidate = callerNameMatch[1].toLowerCase();
+          const blacklist = ["looking", "calling", "here", "fine", "good", "interested", "wanting", "trying", "going"];
+          if (!blacklist.includes(candidate)) {
+            row.caller_name = callerNameMatch[1];
+          }
         }
       }
       // Last fallback: agent says "Great, [Name]!" or "Thanks, [Name]!"
@@ -166,15 +171,36 @@ export async function POST(request: NextRequest) {
       const searchLower = searchText.toLowerCase();
 
       if (row.intent === "event_space_booking") {
-        // Event type
+        // Event type — look for specific patterns, exclude generic words
         if (!row.event_type) {
           const typePatterns = [
-            /(?:for (?:a |an )?)(\w+(?:\s+\w+)?)\s+(?:meetup|meeting|party|workshop|event|photoshoot|gathering|celebration|reception)/i,
-            /(?:book|host|plan)(?:ing)?\s+(?:a |an |our |the )?(\w+(?:\s+\w+)?)\s+(?:meetup|meeting|party|workshop|event)/i,
+            // "for a social tech meetup" — adjective(s) + event word
+            /(?:for (?:a |an ))(\w+(?:\s+\w+)*?)\s+(meetup|meeting|party|workshop|photoshoot|gathering|celebration|reception|conference|seminar|retreat)\b/i,
+            // "book our event space for a tech meetup"
+            /(?:book|host|plan)(?:ing)?\s+(?:a |an |our |the )?\w*\s*(?:space |room )?(?:for (?:a |an )?)(\w+(?:\s+\w+)*?)\s+(meetup|meeting|party|workshop|photoshoot|gathering|celebration|reception|conference)\b/i,
           ];
           for (const p of typePatterns) {
             const m = searchText.match(p);
-            if (m) { row.event_type = m[1].trim() + " " + (m[0].match(/meetup|meeting|party|workshop|event|photoshoot|gathering|celebration|reception/i)?.[0] || ""); row.event_type = row.event_type.trim(); break; }
+            if (m) {
+              const desc = m[1].trim().toLowerCase();
+              // Skip generic words like "this", "the", "our"
+              if (!["this", "the", "our", "your", "that", "an", "a"].includes(desc)) {
+                row.event_type = m[1].trim() + " " + m[2].trim();
+                break;
+              }
+            }
+          }
+          // Broader fallback: caller says what type directly
+          if (!row.event_type) {
+            const callerType = allCallerText.match(
+              /(\w+(?:\s+\w+)*?)\s+(meetup|meeting|party|workshop|photoshoot|gathering|celebration|reception|conference)\b/i
+            );
+            if (callerType) {
+              const desc = callerType[1].trim().toLowerCase();
+              if (!["this", "the", "our", "your", "that", "an", "a", "book", "for"].includes(desc)) {
+                row.event_type = callerType[1].trim() + " " + callerType[2].trim();
+              }
+            }
           }
         }
 
@@ -208,7 +234,7 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Special requirements
+        // Special requirements — "None" only if no other reqs found
         if (!row.special_requirements) {
           const reqs: string[] = [];
           if (searchLower.includes("av ") || searchLower.includes("a/v") || searchLower.includes("audio") || searchLower.includes("projector") || searchLower.match(/\bequipment\b/)) {
@@ -217,7 +243,7 @@ export async function POST(request: NextRequest) {
           if (searchLower.includes("catering") || searchLower.includes("food service")) {
             reqs.push("Catering");
           }
-          if (searchLower.includes("no special") || searchLower.includes("no setup")) {
+          if (reqs.length === 0 && (searchLower.includes("no special") || searchLower.includes("no setup"))) {
             reqs.push("None");
           }
           if (reqs.length) row.special_requirements = reqs.join(", ");
