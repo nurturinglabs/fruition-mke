@@ -162,30 +162,37 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // --- EVENT DETAILS (from confirmation line — most reliable) ---
-      if (row.intent === "event_space_booking" && confirmationLine) {
-        // Event type: "for a [type] meetup/meeting/party" or "for a [type]"
+      // --- EVENT DETAILS ---
+      // Search ALL agent text + caller text, not just confirmation line
+      const searchText = allAgentText + " " + allCallerText;
+      const searchLower = searchText.toLowerCase();
+
+      if (row.intent === "event_space_booking") {
+        // Event type
         if (!row.event_type) {
-          const typeMatch = confirmLower.match(
-            /(?:for (?:a |an )?)([\w\s]+?)(?:\s+on\s+|\s+from\s+|\s+for\s+\d)/i
-          );
-          if (typeMatch) row.event_type = typeMatch[1].trim();
+          const typePatterns = [
+            /(?:for (?:a |an )?)(\w+(?:\s+\w+)?)\s+(?:meetup|meeting|party|workshop|event|photoshoot|gathering|celebration|reception)/i,
+            /(?:book|host|plan)(?:ing)?\s+(?:a |an |our |the )?(\w+(?:\s+\w+)?)\s+(?:meetup|meeting|party|workshop|event)/i,
+          ];
+          for (const p of typePatterns) {
+            const m = searchText.match(p);
+            if (m) { row.event_type = m[1].trim() + " " + (m[0].match(/meetup|meeting|party|workshop|event|photoshoot|gathering|celebration|reception/i)?.[0] || ""); row.event_type = row.event_type.trim(); break; }
+          }
         }
 
-        // Headcount: "for 30 people" or "30 people" or "thirty people"
+        // Headcount — digits first, then word numbers
         if (!row.event_headcount) {
-          const hcMatch = confirmationLine.match(/(\d+)\s*(?:people|guests|attendees|persons|folks)/i);
+          const hcMatch = searchText.match(/(\d+)\s*(?:people|guests|attendees|persons|folks)/i);
           if (hcMatch) {
             row.event_headcount = hcMatch[1];
           } else {
-            // Try word numbers
             const wordNums: Record<string, string> = {
-              ten: "10", fifteen: "15", twenty: "20", "twenty-five": "25",
+              five: "5", ten: "10", fifteen: "15", twenty: "20", "twenty-five": "25",
               thirty: "30", "thirty-five": "35", forty: "40", fifty: "50",
               sixty: "60", seventy: "70", eighty: "80", ninety: "90", hundred: "100",
             };
             for (const [word, num] of Object.entries(wordNums)) {
-              if (confirmLower.includes(word + " people") || confirmLower.includes(word + " guests")) {
+              if (searchLower.includes(word + " people") || searchLower.includes(word + " guests") || searchLower.includes(word + " attendees")) {
                 row.event_headcount = num;
                 break;
               }
@@ -193,10 +200,10 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Date: "on April 11th" or "on April eighteenth"
+        // Date — search all text
         if (!row.event_date) {
-          const dateMatch = confirmationLine.match(
-            /on\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+(?:\d{1,2}(?:st|nd|rd|th)?|\w+))(?:\s+from\s+(.+?)(?:\s+for\s+))?/i
+          const dateMatch = searchText.match(
+            /on\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+(?:\d{1,2}(?:st|nd|rd|th)?|[\w-]+))(?:\s+from\s+(.+?)(?:\s+for\s+|\s+with\s+|\s*\.))?/i
           );
           if (dateMatch) {
             row.event_date = dateMatch[1] + (dateMatch[2] ? " from " + dateMatch[2].trim() : "");
@@ -206,19 +213,38 @@ export async function POST(request: NextRequest) {
         // Special requirements
         if (!row.special_requirements) {
           const reqs: string[] = [];
-          const allLower = (allCallerText + " " + confirmationLine).toLowerCase();
-          if (allLower.includes("av ") || allLower.includes("audio") || allLower.includes("projector") || allLower.includes("equipment")) {
+          if (searchLower.includes("av ") || searchLower.includes("a/v") || searchLower.includes("audio") || searchLower.includes("projector") || searchLower.match(/\bequipment\b/)) {
             reqs.push("AV equipment");
           }
-          if (allLower.includes("catering") || allLower.includes("food service")) {
+          if (searchLower.includes("catering") || searchLower.includes("food service")) {
             reqs.push("Catering");
           }
-          if (allLower.includes("no special") || allLower.includes("no setup")) {
+          if (searchLower.includes("no special") || searchLower.includes("no setup")) {
             reqs.push("None");
           }
           if (reqs.length) row.special_requirements = reqs.join(", ");
         }
       }
+
+      // Also extract coworking details
+      if (row.intent === "coworking_inquiry" && !row.coworking_type) {
+        if (searchLower.includes("day pass")) row.coworking_type = "Day pass";
+        else if (searchLower.includes("membership")) row.coworking_type = "Membership";
+        if (searchLower.includes("team")) row.coworking_type = (row.coworking_type || "") + " (Team)";
+        else if (searchLower.includes("solo")) row.coworking_type = (row.coworking_type || "") + " (Solo)";
+        if (row.coworking_type) row.coworking_type = row.coworking_type.trim();
+      }
+
+      console.log("Extracted row:", JSON.stringify({
+        caller_name: row.caller_name,
+        caller_phone: row.caller_phone,
+        intent: row.intent,
+        event_type: row.event_type,
+        event_date: row.event_date,
+        event_headcount: row.event_headcount,
+        special_requirements: row.special_requirements,
+        callback_preference: row.callback_preference,
+      }));
     }
 
     // Check if Supabase is configured
