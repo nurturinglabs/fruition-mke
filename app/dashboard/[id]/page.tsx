@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CallLog, CallStatus } from "@/types/call";
 import { NavBar } from "@/components/landing/NavBar";
@@ -12,9 +12,9 @@ import Link from "next/link";
 export default function CallDetailPage({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: { id: string };
 }) {
-  const { id } = use(params);
+  const { id } = params;
   const [call, setCall] = useState<CallLog | null>(null);
   const [loading, setLoading] = useState(true);
   const [notes, setNotes] = useState("");
