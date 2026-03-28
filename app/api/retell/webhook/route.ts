@@ -62,55 +62,85 @@ export async function POST(request: NextRequest) {
       transcript: transcript,
     };
 
-    // Extract info from transcript if call_analysis didn't provide it
-    // Only look at CALLER lines to avoid matching agent speech (e.g. "This is Zara")
+    // Extract info from transcript
+    // Strategy: find the agent's CONFIRMATION line (last long agent message that recaps everything)
+    // This is the most reliable source — agent reads back name, phone, event details in one clean sentence
     if (call.transcript_object && Array.isArray(call.transcript_object)) {
-      const callerLines = call.transcript_object
-        .filter((t: { role: string }) => t.role === "user")
-        .map((t: { content: string }) => t.content)
-        .join(" ");
-
-      const agentLines = call.transcript_object
+      const agentMessages = call.transcript_object
         .filter((t: { role: string }) => t.role === "agent")
-        .map((t: { content: string }) => t.content)
-        .join(" ");
+        .map((t: { content: string }) => t.content);
 
-      // Extract name from caller speech
-      if (!row.caller_name) {
-        const nameMatch = callerLines.match(
-          /(?:my name is|i'm|i am|it's|name is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i
-        );
-        if (nameMatch) row.caller_name = nameMatch[1];
+      const callerMessages = call.transcript_object
+        .filter((t: { role: string }) => t.role === "user")
+        .map((t: { content: string }) => t.content);
+
+      // Find the confirmation line — the longest agent message that contains a phone number or "confirm"
+      const confirmationLine = agentMessages
+        .filter((m: string) => m.length > 80)
+        .find((m: string) => {
+          const lower = m.toLowerCase();
+          return lower.includes("confirm") || lower.includes("got here") ||
+                 lower.includes("sound right") || lower.includes("that correct") ||
+                 /\d{3}[-.\s]?\d{3}[-.\s]?\d{4}/.test(m);
+        }) || "";
+
+      const allCallerText = callerMessages.join(" ");
+      const allAgentText = agentMessages.join(" ");
+      const confirmLower = confirmationLine.toLowerCase();
+
+      console.log("Confirmation line found:", confirmationLine.substring(0, 200));
+
+      // --- NAME ---
+      // From confirmation: "You're [Name]" or "that's [Name],"
+      if (!row.caller_name && confirmationLine) {
+        const namePatterns = [
+          /(?:you're|that's|you are)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*[,!.]/i,
+          /(?:you're|that's|you are)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i,
+        ];
+        for (const pattern of namePatterns) {
+          const match = confirmationLine.match(pattern);
+          if (match && !["zara", "welcome", "looking", "calling"].includes(match[1].toLowerCase())) {
+            row.caller_name = match[1];
+            break;
+          }
+        }
       }
-
-      // Also check if agent confirmed a name — "so that's [Name]" or "Great, [Name]!"
+      // Fallback: caller says "my name is X" or "It's X" or "I'm X"
       if (!row.caller_name) {
-        const agentConfirm = agentLines.match(
-          /(?:so that's|got it,?|great,?|perfect,?|thanks?,?)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)[!,.\s]/i
+        const callerNameMatch = allCallerText.match(
+          /(?:my name is|name is|it's|i'm)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*[.,!]?\s*$/im
         );
-        if (agentConfirm && agentConfirm[1].toLowerCase() !== "zara") {
-          row.caller_name = agentConfirm[1];
+        if (callerNameMatch && !["looking", "calling", "here", "fine", "good"].includes(callerNameMatch[1].toLowerCase())) {
+          row.caller_name = callerNameMatch[1];
+        }
+      }
+      // Last fallback: agent says "Great, [Name]!" or "Thanks, [Name]!"
+      if (!row.caller_name) {
+        const agentNameMatch = allAgentText.match(
+          /(?:Great|Thanks|Perfect|Hi|Hello),?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)[\s!.,]/g
+        );
+        if (agentNameMatch) {
+          // Get the last match (most likely the actual caller name, not "Zara")
+          for (const m of agentNameMatch.reverse()) {
+            const extracted = m.replace(/^(?:Great|Thanks|Perfect|Hi|Hello),?\s+/i, "").replace(/[\s!.,]+$/, "");
+            if (extracted.toLowerCase() !== "zara" && extracted.length > 1) {
+              row.caller_name = extracted;
+              break;
+            }
+          }
         }
       }
 
-      // Extract phone from agent confirmation (more reliable — agent reads it back formatted)
+      // --- PHONE ---
       if (!row.caller_phone) {
-        const phoneInAgent = agentLines.match(
-          /(\d{3}[-.\s]?\d{3}[-.\s]?\d{4})/
-        );
-        if (phoneInAgent) row.caller_phone = phoneInAgent[1];
-      }
-      // Fallback: phone from caller speech
-      if (!row.caller_phone) {
-        const phoneInCaller = callerLines.match(
-          /(\d{3}[-.\s]?\d{3}[-.\s]?\d{4})/
-        );
-        if (phoneInCaller) row.caller_phone = phoneInCaller[1];
+        // Best source: agent confirmation has formatted number
+        const phoneMatch = (confirmationLine || allAgentText).match(/(\d{3}[-.\s]?\d{3}[-.\s]?\d{4})/);
+        if (phoneMatch) row.caller_phone = phoneMatch[1];
       }
 
-      // Extract callback preference from caller speech
+      // --- CALLBACK ---
       if (!row.callback_preference) {
-        const callerLower = callerLines.toLowerCase();
+        const callerLower = allCallerText.toLowerCase();
         if (callerLower.includes("morning")) row.callback_preference = "morning";
         else if (callerLower.includes("afternoon")) row.callback_preference = "afternoon";
         else if (callerLower.includes("evening")) row.callback_preference = "evening";
@@ -118,12 +148,12 @@ export async function POST(request: NextRequest) {
           row.callback_preference = "anytime";
       }
 
-      // Detect intent from full transcript
+      // --- INTENT ---
       if (row.intent === "general_inquiry") {
-        const allText = (callerLines + " " + agentLines).toLowerCase();
-        if (allText.includes("event") || allText.includes("book")) {
+        const allText = (allCallerText + " " + allAgentText).toLowerCase();
+        if (allText.includes("book") || allText.includes("event space") || allText.includes("event room")) {
           row.intent = "event_space_booking";
-        } else if (allText.includes("coworking") || allText.includes("desk") || allText.includes("membership")) {
+        } else if (allText.includes("coworking") || allText.includes("desk") || allText.includes("day pass") || allText.includes("membership")) {
           row.intent = "coworking_inquiry";
         } else if (allText.includes("makerspace") || allText.includes("sewing") || allText.includes("woodwork")) {
           row.intent = "makerspace_inquiry";
@@ -132,35 +162,61 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Extract event details from caller + agent speech
-      if (row.intent === "event_space_booking") {
+      // --- EVENT DETAILS (from confirmation line — most reliable) ---
+      if (row.intent === "event_space_booking" && confirmationLine) {
+        // Event type: "for a [type] meetup/meeting/party" or "for a [type]"
         if (!row.event_type) {
-          const typeMatch = callerLines.match(
-            /(?:a |an )?(\w+(?:\s+\w+)?)\s+(?:meetup|meeting|party|workshop|event|photoshoot|gathering)/i
+          const typeMatch = confirmLower.match(
+            /(?:for (?:a |an )?)([\w\s]+?)(?:\s+on\s+|\s+from\s+|\s+for\s+\d)/i
           );
-          if (typeMatch) row.event_type = typeMatch[0].trim();
+          if (typeMatch) row.event_type = typeMatch[1].trim();
         }
+
+        // Headcount: "for 30 people" or "30 people" or "thirty people"
         if (!row.event_headcount) {
-          const headcountMatch = callerLines.match(
-            /(\d+)\s*(?:people|guests|attendees|persons|folks)/i
-          );
-          if (headcountMatch) row.event_headcount = headcountMatch[1];
+          const hcMatch = confirmationLine.match(/(\d+)\s*(?:people|guests|attendees|persons|folks)/i);
+          if (hcMatch) {
+            row.event_headcount = hcMatch[1];
+          } else {
+            // Try word numbers
+            const wordNums: Record<string, string> = {
+              ten: "10", fifteen: "15", twenty: "20", "twenty-five": "25",
+              thirty: "30", "thirty-five": "35", forty: "40", fifty: "50",
+              sixty: "60", seventy: "70", eighty: "80", ninety: "90", hundred: "100",
+            };
+            for (const [word, num] of Object.entries(wordNums)) {
+              if (confirmLower.includes(word + " people") || confirmLower.includes(word + " guests")) {
+                row.event_headcount = num;
+                break;
+              }
+            }
+          }
         }
+
+        // Date: "on April 11th" or "on April eighteenth"
         if (!row.event_date) {
-          // Check agent confirmation for date (more reliable)
-          const dateMatch = agentLines.match(
-            /(?:on |for )?((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+from\s+[\d\s:APMapm]+(?:to|-)[\d\s:APMapm]+)?)/i
+          const dateMatch = confirmationLine.match(
+            /on\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+(?:\d{1,2}(?:st|nd|rd|th)?|\w+))(?:\s+from\s+(.+?)(?:\s+for\s+))?/i
           );
-          if (dateMatch) row.event_date = dateMatch[1];
+          if (dateMatch) {
+            row.event_date = dateMatch[1] + (dateMatch[2] ? " from " + dateMatch[2].trim() : "");
+          }
         }
+
+        // Special requirements
         if (!row.special_requirements) {
-          const lower = callerLines.toLowerCase();
-          if (lower.includes("av ") || lower.includes("audio") || lower.includes("projector") || lower.includes("equipment")) {
-            row.special_requirements = "AV equipment";
+          const reqs: string[] = [];
+          const allLower = (allCallerText + " " + confirmationLine).toLowerCase();
+          if (allLower.includes("av ") || allLower.includes("audio") || allLower.includes("projector") || allLower.includes("equipment")) {
+            reqs.push("AV equipment");
           }
-          if (lower.includes("catering") || lower.includes("food")) {
-            row.special_requirements = (row.special_requirements ? row.special_requirements + ", " : "") + "Catering";
+          if (allLower.includes("catering") || allLower.includes("food service")) {
+            reqs.push("Catering");
           }
+          if (allLower.includes("no special") || allLower.includes("no setup")) {
+            reqs.push("None");
+          }
+          if (reqs.length) row.special_requirements = reqs.join(", ");
         }
       }
     }
