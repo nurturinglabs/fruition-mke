@@ -9,6 +9,11 @@ export async function POST(request: NextRequest) {
 
     console.log("Retell webhook event:", body.event);
 
+    // Only process call_analyzed — ignore call_ended to prevent duplicates
+    if (body.event && body.event !== "call_analyzed") {
+      return NextResponse.json({ success: true, skipped: body.event });
+    }
+
     // Retell nests everything under body.call
     const call = body.call || body;
     const callAnalysis = call.call_analysis?.custom_analysis_data || {};
