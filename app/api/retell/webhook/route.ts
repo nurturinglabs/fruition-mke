@@ -41,10 +41,30 @@ export async function POST(request: NextRequest) {
         .join("\n");
     }
 
+    // Words that look like names after "you're"/"that's" but are actually verbs/fillers.
+    // Applied to both Retell's LLM-extracted caller_name AND our transcript fallbacks,
+    // because Retell's analysis sometimes returns garbage like "looking to" from
+    // phrases like "you're looking to book...".
+    const nameBlacklist = [
+      "zara", "welcome", "looking", "calling", "trying", "wanting", "hoping",
+      "planning", "thinking", "going", "coming", "booking", "interested",
+      "here", "there", "good", "great", "fine", "ready", "set", "all",
+    ];
+    const isBlacklistedName = (candidate: string) => {
+      const firstWord = candidate.trim().split(/\s+/)[0]?.toLowerCase() || "";
+      return nameBlacklist.includes(firstWord);
+    };
+    const sanitizeName = (candidate: string | null | undefined) => {
+      if (!candidate) return null;
+      const trimmed = candidate.trim();
+      if (!trimmed || isBlacklistedName(trimmed)) return null;
+      return trimmed;
+    };
+
     // Extract data from call_analysis if available, otherwise leave null
     // Retell may not always extract structured data
     const row = {
-      caller_name: callAnalysis.caller_name || null,
+      caller_name: sanitizeName(callAnalysis.caller_name),
       caller_phone: callAnalysis.caller_phone || null,
       callback_preference: callAnalysis.callback_preference || null,
       intent: callAnalysis.intent || "general_inquiry",
@@ -89,48 +109,33 @@ export async function POST(request: NextRequest) {
       console.log("Confirmation line found:", confirmationLine.substring(0, 200));
 
       // --- NAME ---
-      // From confirmation: "You're [Name]" or "that's [Name],"
-      if (!row.caller_name && confirmationLine) {
-        const namePatterns = [
-          /(?:you're|that's|you are)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*[,!.]/i,
-          /(?:you're|that's|you are)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i,
-        ];
-        for (const pattern of namePatterns) {
-          const match = confirmationLine.match(pattern);
-          if (match && !["zara", "welcome", "looking", "calling"].includes(match[1].toLowerCase())) {
-            row.caller_name = match[1];
+      // From agent confirmation: "Great, [Name]!" is the most reliable signal
+      // (agent reads back the caller's name when confirming). Try this first.
+      if (!row.caller_name) {
+        const greetNameRegex = /(?:^|[.!?]\s+|\s)(?:Great|Thanks|Thank you|Perfect|Hi|Hello|Awesome|Got it),?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)[\s!.,]/g;
+        const matches = [...allAgentText.matchAll(greetNameRegex)];
+        for (const m of matches) {
+          if (!isBlacklistedName(m[1])) {
+            row.caller_name = m[1];
             break;
           }
         }
       }
-      // Fallback: caller says "my name is X" or "name is X"
-      if (!row.caller_name) {
-        // Only match explicit "my name is" or "name is" — NOT "I'm" which catches "I'm looking to..."
-        const callerNameMatch = allCallerText.match(
-          /(?:my name is|name is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/im
-        );
-        if (callerNameMatch) {
-          const candidate = callerNameMatch[1].toLowerCase();
-          const blacklist = ["looking", "calling", "here", "fine", "good", "interested", "wanting", "trying", "going"];
-          if (!blacklist.includes(candidate)) {
-            row.caller_name = callerNameMatch[1];
-          }
+      // Fallback: "you're [Name]," in the confirmation line — only accept when
+      // followed by a comma/period (real name sign-off), not "you're looking to..."
+      if (!row.caller_name && confirmationLine) {
+        const match = confirmationLine.match(/(?:you're|you are|that's)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*[,!.]/i);
+        if (match && !isBlacklistedName(match[1])) {
+          row.caller_name = match[1];
         }
       }
-      // Last fallback: agent says "Great, [Name]!" or "Thanks, [Name]!"
+      // Fallback: caller says "my name is X", "name is X", or "this is X"
       if (!row.caller_name) {
-        const agentNameMatch = allAgentText.match(
-          /(?:Great|Thanks|Perfect|Hi|Hello),?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)[\s!.,]/g
+        const callerNameMatch = allCallerText.match(
+          /(?:my name is|name is|this is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/im
         );
-        if (agentNameMatch) {
-          // Get the last match (most likely the actual caller name, not "Zara")
-          for (const m of agentNameMatch.reverse()) {
-            const extracted = m.replace(/^(?:Great|Thanks|Perfect|Hi|Hello),?\s+/i, "").replace(/[\s!.,]+$/, "");
-            if (extracted.toLowerCase() !== "zara" && extracted.length > 1) {
-              row.caller_name = extracted;
-              break;
-            }
-          }
+        if (callerNameMatch && !isBlacklistedName(callerNameMatch[1])) {
+          row.caller_name = callerNameMatch[1];
         }
       }
 
