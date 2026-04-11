@@ -328,6 +328,41 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // If Zara confirmed a booking during the call, insert it into the bookings table.
+    // Zara's JSON summary (per the system prompt) includes: room_assigned,
+    // booking_status (confirmed|pending_owner|unavailable), event_date, event_start_time,
+    // event_end_time, event_headcount.
+    if (
+      callAnalysis.booking_status === "confirmed" &&
+      callAnalysis.room_assigned &&
+      callAnalysis.event_date &&
+      callAnalysis.event_start_time &&
+      callAnalysis.event_end_time
+    ) {
+      try {
+        const headcount = parseInt(String(callAnalysis.event_headcount || "0"), 10);
+        const { error: bookingErr } = await supabaseAdmin.from("bookings").insert({
+          room_id: callAnalysis.room_assigned,
+          booker_name: row.caller_name || "Unknown",
+          booker_phone: row.caller_phone,
+          event_type: row.event_type,
+          date: callAnalysis.event_date,
+          start_time: callAnalysis.event_start_time,
+          end_time: callAnalysis.event_end_time,
+          headcount: Number.isFinite(headcount) && headcount > 0 ? headcount : 1,
+          special_requirements: row.special_requirements,
+          status: "confirmed",
+          source: "agent",
+          call_log_id: data.id,
+        });
+        if (bookingErr) {
+          console.error("Booking insert failed:", bookingErr);
+        }
+      } catch (bookingEx) {
+        console.error("Booking insert threw:", bookingEx);
+      }
+    }
+
     // Send email notification (non-blocking)
     try {
       await sendNewCallNotification(data as CallLog);

@@ -9,6 +9,7 @@ export function NavBar() {
   const links = [
     { href: "/", label: "Home" },
     { href: "/dashboard", label: "Dashboard" },
+    { href: "/dashboard/rooms", label: "Rooms" },
     { href: "/pitch", label: "Pitch" },
   ];
 
@@ -26,8 +27,8 @@ export function NavBar() {
         <div className="flex items-center gap-6 text-sm">
           {links.map((link) => {
             const isActive =
-              link.href === "/"
-                ? pathname === "/"
+              link.href === "/" || link.href === "/dashboard"
+                ? pathname === link.href
                 : pathname.startsWith(link.href);
             return (
               <Link
