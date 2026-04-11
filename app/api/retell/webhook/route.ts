@@ -71,6 +71,9 @@ export async function POST(request: NextRequest) {
       event_type: callAnalysis.event_type || null,
       event_date: callAnalysis.event_date || null,
       event_headcount: callAnalysis.event_headcount || null,
+      // Retell's LLM sometimes hallucinates "AV equipment" here because the agent
+      // mentions it in its menu of options — we override below based on the caller's
+      // actual response. Keep Retell's value as a starting point.
       special_requirements: callAnalysis.special_requirements || null,
       coworking_type: callAnalysis.coworking_type || null,
       notes: callAnalysis.notes || null,
@@ -239,17 +242,43 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Special requirements — "None" only if no other reqs found
-        if (!row.special_requirements) {
+        // Special requirements — must come from the CALLER, not the agent.
+        // The agent's prompt itself says "like tables, AV equipment, anything like that?",
+        // so searching combined text always matches AV. We need to detect when the
+        // caller explicitly declined ("no", "nope", "we're good") right after that prompt.
+        const callerLower = allCallerText.toLowerCase();
+        const turns = (call.transcript_object as { role: string; content: string }[]) || [];
+        const reqPromptRegex = /special requirements?|setup needs?|setup requirements?|av equipment|anything like that/i;
+
+        // Find the first agent turn that asked about requirements, then grab the
+        // immediately-following caller turn.
+        let callerResponseAfterPrompt = "";
+        const promptTurnIdx = turns.findIndex(t => t.role === "agent" && reqPromptRegex.test(t.content));
+        if (promptTurnIdx >= 0) {
+          const nextCallerTurn = turns.slice(promptTurnIdx + 1).find(t => t.role === "user");
+          if (nextCallerTurn) callerResponseAfterPrompt = nextCallerTurn.content.toLowerCase().trim();
+        }
+
+        const negatedReqs = /^(no|nope|nah|none|not really|we're good|we are good|that's it|that's all|i'm good|i am good|no thanks|no thank you)\b/i.test(callerResponseAfterPrompt)
+          || /\bno special\b/i.test(callerLower)
+          || /\bno setup\b/i.test(callerLower)
+          || /\bnothing special\b/i.test(callerLower);
+
+        // Re-evaluate from scratch: if Retell filled in "AV equipment" from the agent
+        // prompt, we want to override when the caller actually declined.
+        if (negatedReqs) {
+          row.special_requirements = "None";
+        } else if (!row.special_requirements) {
           const reqs: string[] = [];
-          if (searchLower.includes("av ") || searchLower.includes("a/v") || searchLower.includes("audio") || searchLower.includes("projector") || searchLower.match(/\bequipment\b/)) {
+          // Only match against caller text so the agent's menu-of-options doesn't leak in.
+          if (/\b(av|a\/v|audio|projector|microphone|mic|speaker|screen)\b/i.test(callerLower)) {
             reqs.push("AV equipment");
           }
-          if (searchLower.includes("catering") || searchLower.includes("food service")) {
+          if (/\b(catering|food service|refreshments)\b/i.test(callerLower)) {
             reqs.push("Catering");
           }
-          if (reqs.length === 0 && (searchLower.includes("no special") || searchLower.includes("no setup"))) {
-            reqs.push("None");
+          if (/\b(tables?|chairs?|seating)\b/i.test(callerLower)) {
+            reqs.push("Tables/seating");
           }
           if (reqs.length) row.special_requirements = reqs.join(", ");
         }
