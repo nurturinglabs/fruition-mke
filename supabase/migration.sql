@@ -23,21 +23,23 @@ CREATE TABLE IF NOT EXISTS call_logs (
 );
 
 -- Indexes for common queries
-CREATE INDEX idx_call_logs_status ON call_logs(status);
-CREATE INDEX idx_call_logs_intent ON call_logs(intent);
-CREATE INDEX idx_call_logs_created_at ON call_logs(created_at DESC);
-CREATE INDEX idx_call_logs_urgency ON call_logs(urgency);
+CREATE INDEX IF NOT EXISTS idx_call_logs_status ON call_logs(status);
+CREATE INDEX IF NOT EXISTS idx_call_logs_intent ON call_logs(intent);
+CREATE INDEX IF NOT EXISTS idx_call_logs_created_at ON call_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_call_logs_urgency ON call_logs(urgency);
 
 -- Enable Row Level Security
 ALTER TABLE call_logs ENABLE ROW LEVEL SECURITY;
 
 -- Allow service role full access (for webhook inserts)
+DROP POLICY IF EXISTS "Service role has full access" ON call_logs;
 CREATE POLICY "Service role has full access" ON call_logs
   FOR ALL
   USING (true)
   WITH CHECK (true);
 
 -- Allow anon read access (for dashboard, gated by app-level auth)
+DROP POLICY IF EXISTS "Anon can read call logs" ON call_logs;
 CREATE POLICY "Anon can read call logs" ON call_logs
   FOR SELECT
   USING (true);
@@ -83,13 +85,17 @@ CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);
 ALTER TABLE rooms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bookings ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Service role full access rooms" ON rooms;
 CREATE POLICY "Service role full access rooms" ON rooms
   FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Anon can read rooms" ON rooms;
 CREATE POLICY "Anon can read rooms" ON rooms
   FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Service role full access bookings" ON bookings;
 CREATE POLICY "Service role full access bookings" ON bookings
   FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Anon can read bookings" ON bookings;
 CREATE POLICY "Anon can read bookings" ON bookings
   FOR SELECT USING (true);
 

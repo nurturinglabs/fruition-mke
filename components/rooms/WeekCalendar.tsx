@@ -12,7 +12,8 @@ interface Props {
 
 const START_HOUR = 8;
 const END_HOUR = 20;
-const HOUR_PX = 64;
+const HOUR_PX = 36;
+const HEADER_PX = 40;
 const HOURS = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => START_HOUR + i);
 
 function fmtDayLabel(d: Date): { weekday: string; date: string } {
@@ -56,11 +57,11 @@ export function WeekCalendar({ weekStart, bookings, roomFilter, onBookingClick }
     <div className="bg-[#1A1D27] rounded-xl border border-white/10 overflow-x-auto">
       <div className="min-w-[900px] flex">
         {/* Hour gutter */}
-        <div className="w-[72px] flex-shrink-0 pt-[49px]">
+        <div className="w-[56px] flex-shrink-0" style={{ paddingTop: `${HEADER_PX}px` }}>
           {HOURS.slice(0, -1).map(h => (
             <div
               key={h}
-              className="text-[11px] text-gray-500 text-right pr-3"
+              className="text-[10px] text-gray-500 text-right pr-2 leading-none"
               style={{ height: `${HOUR_PX}px` }}
             >
               {hourLabel(h)}
@@ -83,14 +84,15 @@ export function WeekCalendar({ weekStart, bookings, roomFilter, onBookingClick }
               >
                 {/* Column header */}
                 <div
-                  className={`h-[49px] border-b border-white/10 text-center py-2 ${
+                  className={`border-b border-white/10 text-center flex items-center justify-center gap-1.5 ${
                     isToday ? "bg-terracotta/10" : ""
                   }`}
+                  style={{ height: `${HEADER_PX}px` }}
                 >
-                  <div className="text-xs uppercase tracking-wider text-gray-500">{weekday}</div>
-                  <div className={`text-sm ${isToday ? "text-amber-400 font-semibold" : "text-white"}`}>
+                  <span className="text-[10px] uppercase tracking-wider text-gray-500">{weekday}</span>
+                  <span className={`text-xs ${isToday ? "text-amber-400 font-semibold" : "text-white"}`}>
                     {date}
-                  </div>
+                  </span>
                 </div>
 
                 {/* Hour grid + bookings */}

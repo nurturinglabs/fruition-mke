@@ -76,38 +76,39 @@ export default function RoomsPage() {
     <div className="min-h-screen bg-[#0F1117]">
       <NavBar />
 
-      <main className="max-w-7xl mx-auto px-4 md:px-8 py-6 space-y-6">
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <h1 className="font-heading text-2xl font-bold text-white">Room Availability</h1>
-          <div className="flex items-center gap-3">
+      <main className="max-w-7xl mx-auto px-4 md:px-8 py-3 space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-4">
+            <h1 className="font-heading text-xl font-bold text-white">Room Availability</h1>
+            <RoomFilterTabs value={filter} onChange={setFilter} />
+          </div>
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => shiftWeek(-1)}
-              className="px-3 py-1.5 text-sm text-gray-400 hover:text-white bg-[#1A1D27] border border-white/10 rounded-md"
+              className="px-2.5 py-1 text-xs text-gray-400 hover:text-white bg-[#1A1D27] border border-white/10 rounded-md"
             >
               ← Prev
             </button>
-            <div className="text-white text-sm font-medium min-w-[180px] text-center">
+            <div className="text-white text-xs font-medium min-w-[160px] text-center">
               {formatRange(weekStart)}
             </div>
             <button
               type="button"
               onClick={() => shiftWeek(1)}
-              className="px-3 py-1.5 text-sm text-gray-400 hover:text-white bg-[#1A1D27] border border-white/10 rounded-md"
+              className="px-2.5 py-1 text-xs text-gray-400 hover:text-white bg-[#1A1D27] border border-white/10 rounded-md"
             >
               Next →
             </button>
             <button
               type="button"
               onClick={() => setWeekStart(startOfWeek(new Date()))}
-              className="px-3 py-1.5 text-sm text-amber-400 hover:text-amber-300 border border-amber-400/30 rounded-md"
+              className="px-2.5 py-1 text-xs text-amber-400 hover:text-amber-300 border border-amber-400/30 rounded-md"
             >
               Today
             </button>
           </div>
         </div>
-
-        <RoomFilterTabs value={filter} onChange={setFilter} />
 
         {loading ? (
           <div className="bg-[#1A1D27] rounded-xl p-12 text-center border border-white/10 text-gray-400">
@@ -122,35 +123,26 @@ export default function RoomsPage() {
           />
         )}
 
-        {/* Today's bookings list */}
-        <div className="bg-[#1A1D27] rounded-xl border border-white/10 p-5">
-          <h2 className="font-heading text-lg text-white mb-3">Today&apos;s bookings</h2>
-          {todaysBookings.length === 0 ? (
-            <p className="text-gray-500 text-sm">No bookings today.</p>
-          ) : (
-            <ul className="divide-y divide-white/5">
+        {/* Today's bookings — compact strip */}
+        {todaysBookings.length > 0 && (
+          <div className="bg-[#1A1D27] rounded-lg border border-white/10 px-4 py-2.5">
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Today</span>
               {todaysBookings.map(b => (
-                <li
+                <button
                   key={b.id}
-                  className="py-3 flex items-center justify-between gap-4 cursor-pointer hover:bg-white/5 px-2 rounded"
+                  type="button"
                   onClick={() => setSelected(b)}
+                  className="text-xs text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 px-2.5 py-1 rounded-full whitespace-nowrap"
                 >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-white text-sm font-medium truncate">
-                      {b.booker_name}{b.event_type ? ` — ${b.event_type}` : ""}
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      {b.room?.name || b.room_id} · {b.headcount} people
-                    </div>
-                  </div>
-                  <div className="text-sm text-gray-300 whitespace-nowrap">
-                    {b.start_time.slice(0, 5)}–{b.end_time.slice(0, 5)}
-                  </div>
-                </li>
+                  <span className="text-gray-400">{b.start_time.slice(0, 5)}</span>{" "}
+                  <span className="font-medium">{b.booker_name}</span>
+                  <span className="text-gray-500"> · {b.room?.name || b.room_id}</span>
+                </button>
               ))}
-            </ul>
-          )}
-        </div>
+            </div>
+          </div>
+        )}
       </main>
 
       <BookingDrawer booking={selected} onClose={() => setSelected(null)} />
