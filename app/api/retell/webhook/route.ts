@@ -22,6 +22,8 @@ export async function POST(request: NextRequest) {
     const durationMs = call.duration_ms || 0;
     const duration = durationMs ? Math.round(durationMs / 1000) : null;
     const recordingUrl = call.recording_url || null;
+    // Twilio/Retell exposes the caller's actual incoming phone number here
+    const fromNumber = call.from_number || null;
 
     // Build transcript from transcript_object for clean formatting
     let transcript = call.transcript || null;
@@ -144,9 +146,29 @@ export async function POST(request: NextRequest) {
 
       // --- PHONE ---
       if (!row.caller_phone) {
-        // Best source: agent confirmation has formatted number
-        const phoneMatch = (confirmationLine || allAgentText).match(/(\d{3}[-.\s]?\d{3}[-.\s]?\d{4})/);
+        // Best source: agent/caller text with formatted number
+        const phoneMatch = (confirmationLine || allAgentText + " " + allCallerText)
+          .match(/(\d{3}[-.\s]?\d{3}[-.\s]?\d{4})/);
         if (phoneMatch) row.caller_phone = phoneMatch[1];
+      }
+      // Parse spoken digits like "two six two seven six five one five three six" → "262-765-1536"
+      if (!row.caller_phone) {
+        const digitWords: Record<string, string> = {
+          zero: "0", oh: "0", one: "1", two: "2", three: "3", four: "4",
+          five: "5", six: "6", seven: "7", eight: "8", nine: "9",
+        };
+        const tokens = (allCallerText + " " + allAgentText).toLowerCase().match(/\b(zero|oh|one|two|three|four|five|six|seven|eight|nine)\b/g);
+        if (tokens && tokens.length >= 10) {
+          // take the first contiguous run of 10 digit-words
+          const digits = tokens.slice(0, 10).map(t => digitWords[t]).join("");
+          if (digits.length === 10) {
+            row.caller_phone = `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+          }
+        }
+      }
+      // Final fallback: Twilio/Retell's incoming caller ID
+      if (!row.caller_phone && fromNumber) {
+        row.caller_phone = fromNumber;
       }
 
       // --- CALLBACK ---
